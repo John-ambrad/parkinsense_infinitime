@@ -32,6 +32,14 @@ namespace {
     [BMA4_ACCEL_RANGE_8G] = 256,  // LSB/g +/- 8g range
     [BMA4_ACCEL_RANGE_16G] = 128  // LSB/g +/- 16g range
   };
+
+  // 25 samples at 6 bytes each. The 1 KB FIFO holds about 170, so this leaves room
+  // if the drain is a little late. Headerless frames are 6 bytes, so this is exact.
+  constexpr uint16_t fifoWatermarkBytes = 150;
+
+  // The vendor read copies the whole request onto the stack, and the system task
+  // stack is 350 words. 96 bytes is 16 frames.
+  constexpr uint16_t fifoReadChunkBytes = 96;
 }
 
 Bma421::Bma421(TwiMaster& twiMaster, uint8_t twiAddress) : twiMaster {twiMaster}, deviceAddress {twiAddress} {
@@ -84,11 +92,28 @@ void Bma421::Init() {
   if (ret != BMA4_OK)
     return;
 
-  accel_conf.odr = BMA4_OUTPUT_DATA_RATE_100HZ;
+  accel_conf.odr = BMA4_OUTPUT_DATA_RATE_25HZ;
   accel_conf.range = BMA4_ACCEL_RANGE_2G;
   accel_conf.bandwidth = BMA4_ACCEL_NORMAL_AVG4;
   accel_conf.perf_mode = BMA4_CIC_AVG_MODE;
   ret = bma4_set_accel_config(&accel_conf, &bma);
+  if (ret != BMA4_OK)
+    return;
+
+  // Headerless accel frames. Stop when full so a late drain does not wrap the buffer.
+  ret = bma4_set_fifo_config(BMA4_FIFO_HEADER, BMA4_DISABLE, &bma);
+  if (ret != BMA4_OK)
+    return;
+  ret = bma4_set_fifo_config(BMA4_FIFO_ACCEL | BMA4_FIFO_STOP_ON_FULL, BMA4_ENABLE, &bma);
+  if (ret != BMA4_OK)
+    return;
+  ret = bma4_set_accel_fifo_filter_data(BMA4_ENABLE, &bma);
+  if (ret != BMA4_OK)
+    return;
+  ret = bma4_set_fifo_down_accel(0, &bma);
+  if (ret != BMA4_OK)
+    return;
+  ret = bma4_set_fifo_wm(fifoWatermarkBytes, &bma);
   if (ret != BMA4_OK)
     return;
 
@@ -108,26 +133,74 @@ void Bma421::Write(uint8_t registerAddress, const uint8_t* data, size_t size) {
   twiMaster.Write(deviceAddress, registerAddress, data, size);
 }
 
+Bma421::Sample Bma421::ToWatchAxes(int16_t rawX, int16_t rawY, int16_t rawZ) const {
+  // Scale to units of 'binary milli-g', where 1g = 1024.
+  // See https://github.com/InfiniTimeOrg/InfiniTime/pull/1950 for
+  // why this is 1024 rather than 1000. At ±2 g the divisor is 1024,
+  // so the count is unchanged. X and Y are swapped because of how the
+  // sensor is mounted in the PineTime.
+  const int16_t countsPerG = 1024;
+  const int16_t scale = accelScaleFactors[accel_conf.range];
+  return {static_cast<int16_t>(countsPerG * rawY / scale),
+          static_cast<int16_t>(countsPerG * rawX / scale),
+          static_cast<int16_t>(countsPerG * rawZ / scale)};
+}
+
 Bma421::Values Bma421::Process() {
   if (not isOk)
     return {};
   struct bma4_accel rawData;
-  struct bma4_accel data;
   bma4_read_accel_xyz(&rawData, &bma);
-
-  // Scale the measured ADC counts to units of 'binary milli-g'
-  // where 1g = 1024 'binary milli-g' units.
-  // See https://github.com/InfiniTimeOrg/InfiniTime/pull/1950 for
-  // discussion of why we opted for scaling to 1024 rather than 1000.
-  data.x = 1024 * rawData.x / accelScaleFactors[accel_conf.range];
-  data.y = 1024 * rawData.y / accelScaleFactors[accel_conf.range];
-  data.z = 1024 * rawData.z / accelScaleFactors[accel_conf.range];
 
   uint32_t steps = 0;
   bma423_step_counter_output(&steps, &bma);
 
-  // X and Y axis are swapped because of the way the sensor is mounted in the PineTime
-  return {steps, data.y, data.x, data.z};
+  const Sample sample = ToWatchAxes(rawData.x, rawData.y, rawData.z);
+  return {steps, sample.x, sample.y, sample.z};
+}
+
+size_t Bma421::DrainFifo(Sample* samples, size_t capacity) {
+  if (not isOk || samples == nullptr || capacity == 0)
+    return 0;
+
+  uint16_t available = 0;
+  if (bma4_get_fifo_length(&available, &bma) != BMA4_OK || available < fifoWatermarkBytes)
+    return 0;
+
+  size_t written = 0;
+  while (available >= BMA4_FIFO_A_LENGTH && written < capacity) {
+    const size_t room = capacity - written;
+    uint16_t chunk = available;
+    if (chunk > fifoReadChunkBytes)
+      chunk = fifoReadChunkBytes;
+    if (chunk > room * BMA4_FIFO_A_LENGTH)
+      chunk = static_cast<uint16_t>(room * BMA4_FIFO_A_LENGTH);
+    chunk = static_cast<uint16_t>(chunk - (chunk % BMA4_FIFO_A_LENGTH));
+    if (chunk < BMA4_FIFO_A_LENGTH)
+      break;
+
+    uint8_t raw[fifoReadChunkBytes];
+    struct bma4_fifo_frame frame {};
+    frame.data = raw;
+    frame.length = chunk;
+
+    if (bma4_read_fifo_data(&frame, &bma) != BMA4_OK)
+      break;
+
+    struct bma4_accel parsed[fifoReadChunkBytes / BMA4_FIFO_A_LENGTH];
+    auto frames = static_cast<uint16_t>(chunk / BMA4_FIFO_A_LENGTH);
+    if (bma4_extract_accel(parsed, &frames, &frame, &bma) != BMA4_OK)
+      break;
+
+    for (uint16_t i = 0; i < frames && written < capacity; i++) {
+      samples[written] = ToWatchAxes(parsed[i].x, parsed[i].y, parsed[i].z);
+      written++;
+    }
+
+    available = static_cast<uint16_t>(available - chunk);
+  }
+
+  return written;
 }
 
 bool Bma421::IsOk() const {

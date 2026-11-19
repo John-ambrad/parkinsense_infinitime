@@ -44,6 +44,10 @@ They reside in [components/](/src/components/) inside their own subfolder.
 
 For more detail see the [Apps page](./Apps.md)
 
+## Notes
+
+A new data path, sensor mode, or payload gets a note in [doc/](/doc). Follow [DOCUMENTING.md](/doc/DOCUMENTING.md). [AccelFifo.md](/doc/AccelFifo.md) is an example.
+
 ## Bluetooth
 
 Header files with short documentation for the functions are inside [libs/mynewt-nimble/nimble/host/include/host/](/src/libs/mynewt-nimble/nimble/host/include/host/).

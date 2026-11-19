@@ -16,6 +16,13 @@ namespace Pinetime {
         int16_t z;
       };
 
+      // One acceleration sample in watch axes. 1024 counts is 1 g at the ±2 g range.
+      struct Sample {
+        int16_t x;
+        int16_t y;
+        int16_t z;
+      };
+
       Bma421(TwiMaster& twiMaster, uint8_t twiAddress);
       Bma421(const Bma421&) = delete;
       Bma421& operator=(const Bma421&) = delete;
@@ -27,6 +34,12 @@ namespace Pinetime {
       void SoftReset();
       void Init();
       Values Process();
+
+      // Copies waiting FIFO frames into samples once the watermark is reached.
+      // Returns 0 before that, or when samples is null or capacity is 0.
+      // A return equal to capacity means more frames may still be waiting.
+      size_t DrainFifo(Sample* samples, size_t capacity);
+
       void ResetStepCounter();
 
       void Read(uint8_t registerAddress, uint8_t* buffer, size_t size);
@@ -37,6 +50,7 @@ namespace Pinetime {
 
     private:
       void Reset();
+      Sample ToWatchAxes(int16_t rawX, int16_t rawY, int16_t rawZ) const;
 
       TwiMaster& twiMaster;
       uint8_t deviceAddress = 0x18;

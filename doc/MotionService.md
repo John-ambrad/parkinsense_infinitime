@@ -23,3 +23,5 @@ The current raw motion values. This is a 3 `int16_t` array:
 - [2] : Z
 
 The three motion values are in units of "binary milli-g", where 1g is represented by a value of 1024.
+
+FIFO capture from the same sensor is documented in [AccelFifo.md](AccelFifo.md).
