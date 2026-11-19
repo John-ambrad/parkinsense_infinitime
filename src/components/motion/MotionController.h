@@ -29,6 +29,17 @@ namespace Pinetime {
 
       void Update(int16_t x, int16_t y, int16_t z, uint32_t nbSteps);
 
+      bool IsRecordingSubscribed() const {
+        return service != nullptr && service->IsRecordingSubscribed();
+      }
+
+      // Forwards a drained batch. Does not touch gesture history or the step count.
+      void OnRecordedSamples(const Pinetime::Drivers::Bma421::Sample* samples, size_t count, uint32_t firstSampleMs) {
+        if (service != nullptr) {
+          service->OnBurst(samples, count, firstSampleMs);
+        }
+      }
+
       int16_t X() const {
         return xHistory[0];
       }

@@ -58,6 +58,8 @@ namespace Pinetime {
       struct bma4_accel_config accel_conf; // Store the device configuration for later reference.
       bool isOk = false;
       bool isResetOk = false;
+      // True after a drain filled the caller array and whole frames remain.
+      bool fifoDrainContinues = false;
       DeviceTypes deviceType = DeviceTypes::Unknown;
     };
   }

@@ -164,10 +164,17 @@ size_t Bma421::DrainFifo(Sample* samples, size_t capacity) {
     return 0;
 
   uint16_t available = 0;
-  if (bma4_get_fifo_length(&available, &bma) != BMA4_OK || available < fifoWatermarkBytes)
+  if (bma4_get_fifo_length(&available, &bma) != BMA4_OK)
     return 0;
+  if (!fifoDrainContinues && available < fifoWatermarkBytes)
+    return 0;
+  if (available < BMA4_FIFO_A_LENGTH) {
+    fifoDrainContinues = false;
+    return 0;
+  }
 
   size_t written = 0;
+  bool readFailed = false;
   while (available >= BMA4_FIFO_A_LENGTH && written < capacity) {
     const size_t room = capacity - written;
     uint16_t chunk = available;
@@ -184,13 +191,17 @@ size_t Bma421::DrainFifo(Sample* samples, size_t capacity) {
     frame.data = raw;
     frame.length = chunk;
 
-    if (bma4_read_fifo_data(&frame, &bma) != BMA4_OK)
+    if (bma4_read_fifo_data(&frame, &bma) != BMA4_OK) {
+      readFailed = true;
       break;
+    }
 
     struct bma4_accel parsed[fifoReadChunkBytes / BMA4_FIFO_A_LENGTH];
     auto frames = static_cast<uint16_t>(chunk / BMA4_FIFO_A_LENGTH);
-    if (bma4_extract_accel(parsed, &frames, &frame, &bma) != BMA4_OK)
+    if (bma4_extract_accel(parsed, &frames, &frame, &bma) != BMA4_OK) {
+      readFailed = true;
       break;
+    }
 
     for (uint16_t i = 0; i < frames && written < capacity; i++) {
       samples[written] = ToWatchAxes(parsed[i].x, parsed[i].y, parsed[i].z);
@@ -200,6 +211,7 @@ size_t Bma421::DrainFifo(Sample* samples, size_t capacity) {
     available = static_cast<uint16_t>(available - chunk);
   }
 
+  fifoDrainContinues = readFailed || available >= BMA4_FIFO_A_LENGTH;
   return written;
 }
 

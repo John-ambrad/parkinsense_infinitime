@@ -465,6 +465,32 @@ void SystemTask::UpdateMotion() {
       GoToSleep();
     }
   }
+
+  DrainRecordedMotion();
+}
+
+void SystemTask::DrainRecordedMotion() {
+  if (!motionController.IsRecordingSubscribed()) {
+    return;
+  }
+
+  constexpr size_t batchCapacity = Controllers::MotionService::burstSampleCapacity;
+  Drivers::Bma421::Sample batch[batchCapacity];
+  // A second pass picks up frames that did not fit in the first array.
+  for (int pass = 0; pass < 2; pass++) {
+    size_t count = motionSensor.DrainFifo(batch, batchCapacity);
+    if (count == 0) {
+      return;
+    }
+
+    uint32_t nowMs = static_cast<uint32_t>(xTaskGetTickCount()) * 1000 / configTICK_RATE_HZ;
+    uint32_t ageMs = static_cast<uint32_t>(count - 1) * (1000 / 25);
+    motionController.OnRecordedSamples(batch, count, nowMs - ageMs);
+
+    if (count < batchCapacity) {
+      return;
+    }
+  }
 }
 
 void SystemTask::HandleButtonAction(Controllers::ButtonActions action) {

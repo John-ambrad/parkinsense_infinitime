@@ -6,6 +6,8 @@
 #undef max
 #undef min
 
+#include "drivers/Bma421.h"
+
 namespace Pinetime {
   namespace Controllers {
     class NimbleController;
@@ -13,11 +15,19 @@ namespace Pinetime {
 
     class MotionService {
     public:
+      // One DrainFifo call. 150 bytes of frames is 25 samples.
+      static constexpr size_t burstSampleCapacity = 25;
+
       MotionService(NimbleController& nimble, Controllers::MotionController& motionController);
       void Init();
       int OnStepCountRequested(uint16_t attributeHandle, ble_gatt_access_ctxt* context);
       void OnNewStepCountValue(uint32_t stepCount);
       void OnNewMotionValues(int16_t x, int16_t y, int16_t z);
+      void OnBurst(const Pinetime::Drivers::Bma421::Sample* samples, size_t count, uint32_t firstSampleMs);
+
+      bool IsRecordingSubscribed() const {
+        return burstNotificationEnabled;
+      }
 
       void SubscribeNotification(uint16_t attributeHandle);
       void UnsubscribeNotification(uint16_t attributeHandle);
@@ -26,13 +36,15 @@ namespace Pinetime {
       NimbleController& nimble;
       Controllers::MotionController& motionController;
 
-      struct ble_gatt_chr_def characteristicDefinition[3];
+      struct ble_gatt_chr_def characteristicDefinition[4];
       struct ble_gatt_svc_def serviceDefinition[2];
 
       uint16_t stepCountHandle;
       uint16_t motionValuesHandle;
+      uint16_t burstHandle;
       std::atomic_bool stepCountNotificationEnabled {false};
       std::atomic_bool motionValuesNotificationEnabled {false};
+      std::atomic_bool burstNotificationEnabled {false};
     };
   }
 }

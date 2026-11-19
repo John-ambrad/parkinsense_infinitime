@@ -10,12 +10,12 @@ Gesture wake still uses one fresh sample from `Process`. Tap wake uses the touch
 |---|---|---|
 | 25 Hz, FIFO enabled, 150-byte watermark | Written | `Bma421::Init` |
 | `ToWatchAxes` | Written | `Bma421` |
-| `DrainFifo` | Written, not called | `Bma421::DrainFifo` |
-| Call `DrainFifo` every 100 ms | Planned | `SystemTask::UpdateMotion` |
-| Forward the batch without touching gesture history | Planned | `MotionController` |
-| Send the batch, then drop the local array | Planned | `MotionService` |
+| `DrainFifo` | Written | `Bma421::DrainFifo` |
+| Call `DrainFifo` every 100 ms while the burst characteristic is subscribed | Written | `SystemTask::DrainRecordedMotion` |
+| Forward the batch without touching gesture history | Written | `MotionController::OnRecordedSamples` |
+| Send the batch, then drop the local array | Written | `MotionService::OnBurst` |
 
-`MotionService` does not see the chip. The notification layout is a later note.
+`MotionService` does not read the chip. It sends the array it is given.
 
 ## Flow
 
@@ -36,10 +36,10 @@ flowchart TD
   gestures -->|6 bytes, when that characteristic is subscribed| six[Existing motion characteristic]
 
   fifo -->|DrainFifo copies the batch| local[Caller array of Samples]
-  local -->|planned handoff, then the array is discarded| notify[MotionService notification]
+  local -->|OnRecordedSamples hands it over, then the array is discarded| notify[MotionService notification]
 ```
 
-After the copy, the chip no longer has those samples. They live in the caller’s array until the planned send, and the watch does not keep another copy. Samples that arrive afterward go back into the FIFO and wait for the next time the line is reached.
+After the copy, the chip no longer has those samples. They live in the caller’s array until `OnBurst` sends them, and the watch does not keep another copy. Samples that arrive afterward go back into the FIFO and wait for the next time the line is reached.
 
 ### Which function calls the next
 
@@ -51,9 +51,9 @@ flowchart TD
   axes -->|calls today| update[MotionController Update]
   update -->|calls today, when subscribed| six[OnNewMotionValues]
 
-  tick -->|planned call| drain[DrainFifo]
-  drain -->|planned call, when the copy is not empty| forward[MotionController batch method]
-  forward -->|planned call| send[MotionService burst notify]
+  tick -->|calls DrainRecordedMotion| drain[DrainFifo, when the burst characteristic is subscribed]
+  drain -->|calls when the copy is not empty| forward[MotionController OnRecordedSamples]
+  forward -->|calls| send[MotionService OnBurst]
 ```
 
 ## Contract
@@ -69,6 +69,11 @@ flowchart TD
 | `samples` | Caller array | Destination for drained frames. The caller owns it. |
 | `capacity` | Count | Slots in `samples`. A return equal to `capacity` means frames may still be waiting. Pass at least 25. |
 | `available` | Byte count | FIFO fill level at the start of the call. |
+| `burstSampleCapacity` | Constant, 25 | Most samples one notification and one stack array can hold. |
+| `firstSampleMs` | `uint32` | Milliseconds since boot of the oldest sample in the notification. The newest sample is the drain time. Each older sample is 40 ms earlier. |
+| Burst notification | Bytes, little-endian | `uint8 count`, then `uint32 firstSampleMs`, then `count` samples (`int16 x`, `y`, `z` in watch axes). Characteristic `00030003-78fc-48fe-8e23-433b3a1942d0`, notify only. |
+
+A notification of 25 samples is 155 bytes. `OnBurst` sends it only when the link MTU can hold those bytes plus the 3-byte ATT notify header. A smaller MTU does not produce a shortened packet.
 
 `Init` also selects headerless accelerometer frames, filtered data, no extra downsampling, and stop-on-full. Stop-on-full keeps a late drain from wrapping the 1 KB buffer. Averaging mode (`BMA4_CIC_AVG_MODE`) is unchanged.
 
@@ -82,6 +87,7 @@ flowchart TD
 | `frame` | Bosch descriptor | Points at `raw` for `bma4_read_fifo_data`. |
 | `parsed` | Chip frames | Up to 16 triples in chip axis order, before `ToWatchAxes`. |
 | `written` | Count | Frames stored in this call. This is the return value. |
+| `fifoDrainContinues` | Flag | Set when the caller array filled and whole frames remain. The next `DrainFifo` copies those frames even though the FIFO is under 150 bytes. |
 
 ## Timing
 
