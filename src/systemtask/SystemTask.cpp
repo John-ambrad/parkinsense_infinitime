@@ -470,7 +470,7 @@ void SystemTask::UpdateMotion() {
 }
 
 void SystemTask::DrainRecordedMotion() {
-  if (!motionController.IsRecordingSubscribed()) {
+  if (!motionController.IsRecordingSubscribed() && !motionController.RecordingRequested()) {
     return;
   }
 

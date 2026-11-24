@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 
 #include <FreeRTOS.h>
@@ -33,8 +34,46 @@ namespace Pinetime {
         return service != nullptr && service->IsRecordingSubscribed();
       }
 
-      // Forwards a drained batch. Does not touch gesture history or the step count.
+      // The accel screen sets this so the FIFO is drained with no phone connected.
+      void SetRecordingRequested(bool requested) {
+        recordingRequested = requested;
+      }
+
+      bool RecordingRequested() const {
+        return recordingRequested;
+      }
+
+      uint8_t LastBurstCount() const {
+        return lastBurstCount;
+      }
+
+      uint32_t LastBurstFirstMs() const {
+        return lastBurstFirstMs;
+      }
+
+      int16_t LastBurstX() const {
+        return lastBurstX;
+      }
+
+      int16_t LastBurstY() const {
+        return lastBurstY;
+      }
+
+      int16_t LastBurstZ() const {
+        return lastBurstZ;
+      }
+
+      // Keeps the newest sample for the accel screen, then forwards the batch.
+      // Does not touch gesture history or the step count.
       void OnRecordedSamples(const Pinetime::Drivers::Bma421::Sample* samples, size_t count, uint32_t firstSampleMs) {
+        if (samples != nullptr && count > 0) {
+          const auto& newest = samples[count - 1];
+          lastBurstCount = static_cast<uint8_t>(count > 255 ? 255 : count);
+          lastBurstFirstMs = firstSampleMs;
+          lastBurstX = newest.x;
+          lastBurstY = newest.y;
+          lastBurstZ = newest.z;
+        }
         if (service != nullptr) {
           service->OnBurst(samples, count, firstSampleMs);
         }
@@ -123,6 +162,13 @@ namespace Pinetime {
 
       DeviceTypes deviceType = DeviceTypes::Unknown;
       Pinetime::Controllers::MotionService* service = nullptr;
+
+      std::atomic<bool> recordingRequested {false};
+      std::atomic<uint8_t> lastBurstCount {0};
+      std::atomic<uint32_t> lastBurstFirstMs {0};
+      std::atomic<int16_t> lastBurstX {0};
+      std::atomic<int16_t> lastBurstY {0};
+      std::atomic<int16_t> lastBurstZ {0};
     };
   }
 }

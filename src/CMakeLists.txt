@@ -379,6 +379,7 @@ list(APPEND SOURCE_FILES
         displayapp/screens/Navigation.cpp
         displayapp/screens/Metronome.cpp
         displayapp/screens/Motion.cpp
+        displayapp/screens/AccelCheck.cpp
         displayapp/screens/Weather.cpp
         displayapp/screens/Calculator.cpp
         displayapp/screens/FirmwareValidation.cpp
@@ -618,6 +619,7 @@ set(INCLUDE_FILES
         displayapp/screens/HeartRate.h
         displayapp/screens/Metronome.h
         displayapp/screens/Motion.h
+        displayapp/screens/AccelCheck.h
         displayapp/screens/Timer.h
         displayapp/screens/Dice.h
         displayapp/screens/Alarm.h

@@ -11,11 +11,14 @@ Gesture wake still uses one fresh sample from `Process`. Tap wake uses the touch
 | 25 Hz, FIFO enabled, 150-byte watermark | Written | `Bma421::Init` |
 | `ToWatchAxes` | Written | `Bma421` |
 | `DrainFifo` | Written | `Bma421::DrainFifo` |
-| Call `DrainFifo` every 100 ms while the burst characteristic is subscribed | Written | `SystemTask::DrainRecordedMotion` |
+| Call `DrainFifo` every 100 ms while the burst characteristic is subscribed, or while the accel screen is open | Written | `SystemTask::DrainRecordedMotion` |
 | Forward the batch without touching gesture history | Written | `MotionController::OnRecordedSamples` |
+| Show the newest FIFO sample beside the live sample | Written | `Screens::AccelCheck` |
 | Send the batch, then drop the local array | Written | `MotionService::OnBurst` |
 
 `MotionService` does not read the chip. It sends the array it is given.
+
+The launcher’s first icon opens Accel check. While that screen is open, the FIFO is drained even with no phone connected. The screen shows the live sample and the newest sample of the last batch. 1024 counts is 1 g. Leaving the screen stops that extra drain.
 
 ## Flow
 
