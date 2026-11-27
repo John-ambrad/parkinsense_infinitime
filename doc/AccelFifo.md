@@ -76,7 +76,7 @@ flowchart TD
 | `firstSampleMs` | `uint32` | Milliseconds since boot of the oldest sample in the notification. The newest sample is the drain time. Each older sample is 40 ms earlier. |
 | Burst notification | Bytes, little-endian | `uint8 count`, then `uint32 firstSampleMs`, then `count` samples (`int16 x`, `y`, `z` in watch axes). Characteristic `00030003-78fc-48fe-8e23-433b3a1942d0`, notify only. |
 
-A notification of 25 samples is 155 bytes. `OnBurst` sends it only when the link MTU can hold those bytes plus the 3-byte ATT notify header. A smaller MTU does not produce a shortened packet.
+A notification of 25 samples is 155 bytes, and it needs an MTU of at least 158 (the 3-byte ATT notify header included). When the link MTU is smaller, `OnBurst` splits the batch into several notifications. Each notification holds as many samples as the MTU allows (at most 25), and each one carries its own `firstSampleMs`, so the phone can still place every sample at the right time. Samples are never dropped for MTU reasons.
 
 `Init` also selects headerless accelerometer frames, filtered data, no extra downsampling, and stop-on-full. Stop-on-full keeps a late drain from wrapping the 1 KB buffer. Averaging mode (`BMA4_CIC_AVG_MODE`) is unchanged.
 

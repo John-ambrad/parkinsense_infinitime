@@ -3,6 +3,7 @@
 #include "components/ble/NimbleController.h"
 #include <host/ble_att.h>
 #include <nrf_log.h>
+#include <algorithm>
 
 using namespace Pinetime::Controllers;
 
@@ -127,11 +128,28 @@ void MotionService::OnBurst(const Pinetime::Drivers::Bma421::Sample* samples, si
     return;
   }
 
-  const uint16_t payloadLength = static_cast<uint16_t>(1 + sizeof(firstSampleMs) + count * 6);
   // ATT notify uses 1 opcode byte and 2 handle bytes in front of the payload.
-  if (ble_att_mtu(connectionHandle) < payloadLength + 3) {
+  const size_t attPayloadLimit = ble_att_mtu(connectionHandle) - 3;
+  constexpr size_t headerLength = 1 + sizeof(firstSampleMs);
+  if (attPayloadLimit <= headerLength) {
     return;
   }
+  const size_t samplesPerNotify = std::min(burstSampleCapacity, (attPayloadLimit - headerLength) / 6);
+
+  size_t start = 0;
+  while (start < count) {
+    const size_t chunkCount = std::min(samplesPerNotify, count - start);
+    const uint32_t chunkFirstSampleMs = firstSampleMs + static_cast<uint32_t>(start) * burstSampleIntervalMs;
+    SendBurstChunk(connectionHandle, samples + start, chunkCount, chunkFirstSampleMs);
+    start += chunkCount;
+  }
+}
+
+void MotionService::SendBurstChunk(uint16_t connectionHandle,
+                                   const Pinetime::Drivers::Bma421::Sample* samples,
+                                   size_t count,
+                                   uint32_t firstSampleMs) {
+  const uint16_t payloadLength = static_cast<uint16_t>(1 + sizeof(firstSampleMs) + count * 6);
 
   uint8_t buffer[1 + sizeof(firstSampleMs) + burstSampleCapacity * 6];
   buffer[0] = static_cast<uint8_t>(count);

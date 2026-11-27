@@ -17,6 +17,8 @@ namespace Pinetime {
     public:
       // One DrainFifo call. 150 bytes of frames is 25 samples.
       static constexpr size_t burstSampleCapacity = 25;
+      // 25 Hz. Each older sample in a batch is one interval earlier.
+      static constexpr uint32_t burstSampleIntervalMs = 1000 / 25;
 
       MotionService(NimbleController& nimble, Controllers::MotionController& motionController);
       void Init();
@@ -33,6 +35,11 @@ namespace Pinetime {
       void UnsubscribeNotification(uint16_t attributeHandle);
 
     private:
+      void SendBurstChunk(uint16_t connectionHandle,
+                          const Pinetime::Drivers::Bma421::Sample* samples,
+                          size_t count,
+                          uint32_t firstSampleMs);
+
       NimbleController& nimble;
       Controllers::MotionController& motionController;
 
